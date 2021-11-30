@@ -1,0 +1,12 @@
+[Unit]
+Description=Firmware Update Service
+
+[Service]
+Type=simple
+ExecStart= /usr/bin/python3 /home/pi/UPDATE/main.py   
+Restart=on-failure
+RestartSec=5s
+StandardOutput=null
+
+[Install]
+WantedBy=multi-user.target

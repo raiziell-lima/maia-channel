@@ -1,0 +1,13 @@
+
+[Unit]
+Description=Maia Channel Service
+
+[Service]
+Type=simple
+ExecStart= /usr/bin/python3 /home/pi/MAIA_CHANNEL/maia_channel.py
+Restart=on-failure
+RestartSec=5s
+StandardOutput=null
+
+[Install]
+WantedBy=multi-user.target

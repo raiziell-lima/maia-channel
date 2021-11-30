@@ -1,0 +1,6 @@
+<settings>
+    <maia_ch>
+        <ch_freq>462700</ch_freq>
+        <qos>1</qos>
+    </maia_ch>
+</settings>
