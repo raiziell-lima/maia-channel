@@ -1,12 +1,13 @@
 [Unit]
-Description=Firmware Update Service
+Description=Flash Drive Upload Service
 
 [Service]
 Type=simple
-ExecStart= /usr/bin/python3 /home/pi/UPDATE/main.py   
+ExecStart= /usr/bin/python3 /home/pi/maia_channel/flash_drive_upload.py
 Restart=on-failure
 RestartSec=5s
 StandardOutput=null
 
 [Install]
 WantedBy=multi-user.target
+

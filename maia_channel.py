@@ -1,6 +1,8 @@
 import time
+import RPi.GPIO as gpio
 import os
 import json
+import logging
 import threading
 import pathlib
 import serial
@@ -8,40 +10,54 @@ import subprocess
 import paho.mqtt.client as mqtt
 import pocketsphinx
 from pocketsphinx import LiveSpeech
+from multiprocessing import Process
 import xml.etree.ElementTree as ET
 from pydub import AudioSegment, silence
 
 working_env = str(pathlib.Path(__file__).parent.absolute())
+#
+print(working_env)
 
 # INICIA O DAEMON DO PULSEAUDIO
 subprocess.call(["sudo /usr/bin/pulseaudio --start --log-target=syslog --system=false"], shell=True)
 
 # SERIAL COMMUNICATION SETTINGS
 serial_port = "/dev/ttyACM0"
-baudrate = 9600
-ser = serial.Serial(serial_port, baudrate)
+baudrate    = 9600
+ser         = serial.Serial(serial_port, baudrate)
 
 # TRANSMISSION SETTINGS
 tree = ET.parse(working_env+"/settings.xml")
 root = tree.getroot()
-current_freq = int(root[0][0].text)
+current_freq   = int(root[0][0].text)
 current_qos = int(root[0][1].text)
 ready_to_update = True
 free_to_recognize = True
 
 # MQTT SETTINGS
-broker = "broker.emqx.io" # ATENTAR PARA MUDAR ESSE PARÂMETRO
-client_name = "MAIA CHANNEL 003"
-mqtt_user = "mqtt-test"
-mqtt_pwd = "mqtt-test"
-mqtt_port = 1883
+broker      = "192.168.2.11" # ATENTAR PARA MUDAR ESSE PARÂMETRO
+client_name = "MAIA CHANNEL 005"
+mqtt_user   = "mqtt-test"
+mqtt_pwd    = "mqtt-test"
+mqtt_port   = 1883
 keep_alive_broker = 60
 
 # SPHINX SETTINGS
-hmm = working_env+"/model/pt_br"
-lm = working_env+"/model/data_lmtool_mensagem.lm.bin"
+hmm  = working_env+"/model/pt_br"
+lm   = working_env+"/model/data_lmtool_mensagem.lm.bin"
 dict = working_env+"/model/data_lmtool_mensagem.dic"
 new_command = []
+
+# LED SETTINGS
+REQ_LED_PIN = 32
+gpio.setmode(gpio.BOARD)
+gpio.setup(REQ_LED_PIN, gpio.OUT)
+sign = gpio.PWM(REQ_LED_PIN, 120)
+
+CON_LED_PIN = 35
+gpio.setmode(gpio.BOARD)
+gpio.setup(CON_LED_PIN, gpio.OUT)
+sign_2 = gpio.PWM(CON_LED_PIN, 120)
 
 lines = {
             "GLUM":         "GL1",
@@ -63,11 +79,11 @@ lines = {
             "GLDEZESSETE": "GL17",
             "GLDEZOITO":   "GL18",
             "GLDEZENOVE":  "GL19",
-            "GLVINTE":     "GL20"
+            "GLVINTE":     "GL20",
         }
 
-messages = {
-                "REUNIAO":    3,
+messages =  {
+                "REUNIAO" :   3,
                 "CAFE":       1,
                 "ERGONOMICA": 2
             }
@@ -81,11 +97,11 @@ def update(new_freq, new_qos):
     tree = ET.parse(working_env+"/settings.xml")
     root = tree.getroot()
 
-    if new_freq != current_freq:
+    if (new_freq != current_freq):
         current_freq = new_freq
         root[0][0].text = str(new_freq)
 
-        if new_qos != current_qos:
+        if (new_qos != current_qos):
             current_qos = new_qos
             root[0][1].text = str(new_qos)
 
@@ -93,7 +109,7 @@ def update(new_freq, new_qos):
         msg = create_json(1, new_freq, 0)
         ser.write(msg.encode("utf-8"))
 
-    elif new_qos != current_qos:
+    elif (new_qos != current_qos):
         current_qos = new_qos
         root[0][1].text = str(new_qos)
         tree.write(working_env+"/settings.xml")
@@ -107,6 +123,7 @@ def on_log(client, userdata, level, buf):
 def on_connect(client, userdata, flags, rc):
     print("[STATUS] Broker connected. Conection results: "+str(rc))
     client.subscribe("maia/mc_update", qos=1)
+    sign_2.start(20)
 
 
 def on_message(client, userdata, msg):
@@ -116,7 +133,7 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload)
         if f_key and qos_key in payload:
             attempts = 3
-            while attempts > 0:
+            while(attempts > 0):
                 if ready_to_update:
                     attempts = 0
                     update(payload[f_key], payload[qos_key])
@@ -124,8 +141,9 @@ def on_message(client, userdata, msg):
                     attempts = attempts - 1
                     time.sleep(6)
 
-    except Exception as e:
-        print("Erro detectado. %s" % str(e))
+    except:
+        pass
+        print ("Mensagem fora de padrão")
 
 
 def send_mqtt_msg(dest, msg):
@@ -136,7 +154,7 @@ def look_for_correction(audio_path):
     audio = AudioSegment.from_wav(audio_path)
     s = silence.detect_silence(audio, min_silence_len=1000, silence_thresh=-28)
     s = [((start / 1000), (stop / 1000)) for start, stop in s]  # convert to sec
-    silence_len = 0.98 * (len(audio)/1000)  # O áudio será considerado silêncio se pelo menos 98% for silêncio
+    silence_len = 0.98 * (len(audio)/1000) #O áudio será considerado silêncio se pelo menos 98% for silêncio
 
     if len(s) == 0:
         return True
@@ -145,7 +163,7 @@ def look_for_correction(audio_path):
         interval = 0
         for x in s:
             print(x)
-            interval = interval + (x[1] - x[0])
+            interval =  interval + (x[1] - x[0])
 
         if interval >= silence_len:
             return False
@@ -154,7 +172,7 @@ def look_for_correction(audio_path):
 
 
 def play_audio(audio_name):
-    audio_name += ".wav"
+    audio_name+= ".wav"
     dir = working_env+"/audios/"+audio_name
     os.system("aplay "+dir)
 
@@ -180,8 +198,8 @@ def create_json(op_mode, freq, time_):
 
 def send_feedback(topic, msg):
     ser_msg = create_json(0, 0, 5500)  # Gera uma mensagem com a estrutura Json
-    ser.write(ser_msg.encode("utf-8"))  # Envia a mensagem pro Arduíno
-    time.sleep(1.1)  # Espera o Arduíno configurar o modo transmissor antes de reproduzir os áudios
+    ser.write(ser_msg.encode("utf-8")) # Envia a mensagem pro Arduíno
+    time.sleep(1.1) # Espera o Arduíno configurar o modo transmissor antes de reproduzir os áudios
 
     play_audio(lines[topic])
     time.sleep(1)
@@ -195,24 +213,26 @@ def handle():
     global free_to_recognize
     global ready_to_update
 
-    while True:
-        if len(new_command):
+    while(True):
+        if (len(new_command)):
+            sign.start(3)
+
             print("[INFO] Comando válido detectado")
             print(new_command)
 
             send_feedback(new_command[0], new_command[1])
-
+            time.sleep(2)
             print("[INFO] Realizando captura do áudio de correção...")
             pocketsphinx.capture[0] = True
             time.sleep(6)
 
             print("Chamando função de correção...")
-            correction = look_for_correction(working_env+"/sphx_capture.wav")
+            correction = look_for_correction("sphx_capture.wav")
 
-            os.system("rm " + working_env+"/sphx_capture.wav")
+            os.system("rm sphx_capture.wav")
 
             if correction:
-                print("Correção realizada!")
+                print ("Correção realizada!")
                 ser_msg = create_json(0, 0, 3000)
                 ser.write(ser_msg.encode("utf-8"))
                 time.sleep(1.1)
@@ -223,13 +243,15 @@ def handle():
                 new_command = []
 
             else:
-                print("Nenhuma correção realizada.\nPublicando mensagem ...")
+                print ("Nenhuma correção realizada.\nPublicando mensagem ...")
                 print(f'Tópico: {new_command[0]} | Mensagem: {new_command[1]}')
                 send_mqtt_msg(lines[new_command[0]], messages[new_command[1]])
 
                 free_to_recognize = True
                 ready_to_update = True
                 new_command = []
+
+            sign.stop()
 
 
 def main():
@@ -245,7 +267,7 @@ def main():
             # O menor comando válido possui 10 caracteres em sua estrutura
             # Essa verificação descarta processamento desnecessário com ruídos
 
-            if len(str(phrase)) >= 10:
+            if len(str(phrase))>=10:
 
                 dest = False
                 msg = False
